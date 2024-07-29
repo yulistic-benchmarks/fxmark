@@ -87,7 +87,8 @@ static void worker_main(void *arg)
         int err = 0;
 
         /* set affinity */ 
-        setaffinity(worker->id);
+	// HARDCODING: Use NUMA node 1
+        setaffinity(worker->id + 16);
 
         /* pre-work */
         if (bench->ops.pre_work) {

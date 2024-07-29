@@ -256,7 +256,8 @@ class Runner(object):
                       self.dev_null)
         self.drop_caches()
         self.exec_cmd("sync", self.dev_null)
-        self.set_cpus(ncore)
+        # We do not offlining CPU cores because z-journal does not work.
+        # self.set_cpus(ncore)
 
     def pre_work(self):
         self.keep_sudo()
@@ -476,7 +477,8 @@ class Runner(object):
             self.log_end()
             self.fxmark_cleanup()
             self.umount(self.test_root)
-            self.set_cpus(0)
+            # We do not offlining CPU cores because z-journal does not work.
+            #  self.set_cpus(0)
 
 def confirm_media_path():
     print("%" * 80)
@@ -515,9 +517,9 @@ if __name__ == "__main__":
 
     # TODO: make it scriptable
     run_config = [
-        (Runner.CORE_FINE_GRAIN,
-         PerfMon.LEVEL_LOW,
-         ("mem", "*", "DWOL", "80", "directio")),
+        # Set proper thread numbers in the cpupol.py.
+        (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4", "DWAL", "*", "bufferedio")),
+        # ("mem", "*", "DWOL", "80", "directio")),
         # ("mem", "tmpfs", "filebench_varmail", "32", "directio")),
         # (Runner.CORE_COARSE_GRAIN,
         #  PerfMon.LEVEL_PERF_RECORD,
