@@ -33,6 +33,8 @@ class Runner(object):
     CORE_FINE_GRAIN   = 0
     CORE_COARSE_GRAIN = 1
 
+    JOURNAL_SIZE = 38 * 1024 # in MB.
+
     def __init__(self, \
                  core_grain = CORE_COARSE_GRAIN, \
                  pfm_lvl = PerfMon.LEVEL_LOW, \
@@ -51,7 +53,7 @@ class Runner(object):
         self.MEDIA_TYPES   = ["ssd", "hdd", "nvme", "mem"]
 #        self.FS_TYPES      = [
         self.FS_TYPES      = ["tmpfs",
-                              "ext4", "ext4_no_jnl",
+                              "ext4_data", "ext4", "ext4_no_jnl", "ext4_zj",
                               "xfs",
                               "btrfs", "f2fs",
                               # "jfs", "reiserfs", "ext2", "ext3",
@@ -68,25 +70,25 @@ class Runner(object):
             "MWCM",
             "MWUM",
             "MWUL",
-            "DWTL",
+#            "DWTL",
 
             # filebench
-            "filebench_varmail",
-            "filebench_oltp",
-            "filebench_fileserver",
+#            "filebench_varmail",
+#            "filebench_oltp",
+#            "filebench_fileserver",
 
             # dbench
-            "dbench_client",
+#            "dbench_client",
 
             # read/read
-            "MRPL",
-            "MRPM",
-            "MRPH",
-            "MRDM",
-            "MRDL",
-            "DRBH",
-            "DRBM",
-            "DRBL",
+#            "MRPL",
+#            "MRPM",
+#            "MRPH",
+#            "MRDM",
+#            "MRDL",
+#            "DRBH",
+#            "DRBM",
+#            "DRBL",
 
             # read/write
             # "MRPM_bg",
@@ -111,8 +113,10 @@ class Runner(object):
             "tmpfs":self.mount_tmpfs,
             "ext2":self.mount_anyfs,
             "ext3":self.mount_anyfs,
-            "ext4":self.mount_anyfs,
+            "ext4":self.mount_ext4,
+            "ext4_data":self.mount_ext4_data,
             "ext4_no_jnl":self.mount_ext4_no_jnl,
+            "ext4_zj":self.mount_ext4_zj,
             "xfs":self.mount_anyfs,
             "btrfs":self.mount_anyfs,
             "f2fs":self.mount_anyfs,
@@ -122,8 +126,12 @@ class Runner(object):
         self.HOWTO_MKFS = {
             "ext2":"-F",
             "ext3":"-F",
-            "ext4":"-F",
-            "ext4_no_jnl":"-F",
+            #  "ext4":"-F",
+            "ext4":"-F -G 1", # Journal size = 38 * 1024 MB
+            "ext4_data":"-F -G 1", # Journal size = 38 * 1024 MB
+            #  "ext4_no_jnl":"-F",
+            "ext4_no_jnl":"-F -G 1", # Journal size = 38 * 1024 MB
+            "ext4_zj":"-F -G 1", # Journal size = 38 * 1024 MB
             "xfs":"-f",
             "btrfs":"-f",
             "jfs":"-q",
@@ -193,6 +201,7 @@ class Runner(object):
         self.log("### PHYSICAL_CHIPS = %s" % cpupol.PHYSICAL_CHIPS)
         self.log("### CORE_PER_CHIP  = %s" % cpupol.CORE_PER_CHIP)
         self.log("### SMT_LEVEL      = %s" % cpupol.SMT_LEVEL)
+        self.log("### JOURNAL_SIZE   = %s" % self.JOURNAL_SIZE)
         self.log("\n")
 
     def log_end(self):
@@ -315,13 +324,13 @@ class Runner(object):
         (rc, dev_path) = _init_media()
         return (rc, dev_path)
 
-    def mount_tmpfs(self, media, fs, mnt_path):
+    def mount_tmpfs(self, media, fs, mnt_path, nfg):
         p = self.exec_cmd("sudo mount -t tmpfs -o mode=0777,size="
                           + self.DISK_SIZE + " none " + mnt_path,
                           self.dev_null)
         return p.returncode == 0
 
-    def mount_anyfs(self, media, fs, mnt_path):
+    def mount_anyfs(self, media, fs, mnt_path, nfg):
         (rc, dev_path) = self.init_media(media)
         if not rc:
             return False
@@ -343,7 +352,67 @@ class Runner(object):
             return False
         return True
 
-    def mount_ext4_no_jnl(self, media, fs, mnt_path):
+    def mount_ext4_data(self, media, fs, mnt_path, nfg):
+        (rc, dev_path) = self.init_media(media)
+        if not rc:
+            return False
+
+        journal_size = self.JOURNAL_SIZE
+        #  print("#### journal_size:" + str(journal_size))
+
+        p = self.exec_cmd("sudo mkfs.ext4"
+                          + " " + self.HOWTO_MKFS.get(fs, "")
+                          + " -J size=" + str(journal_size)
+                          + " " + dev_path,
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+
+        # Set data journal
+        p = self.exec_cmd("sudo tune2fs -o journal_data %s" % dev_path,
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+
+        p = self.exec_cmd(' '.join(["sudo mount -t ext4",
+                                    dev_path, mnt_path]),
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+        p = self.exec_cmd("sudo chmod 777 " + mnt_path,
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+        return True
+
+    def mount_ext4(self, media, fs, mnt_path, nfg):
+        (rc, dev_path) = self.init_media(media)
+        if not rc:
+            return False
+
+        journal_size = self.JOURNAL_SIZE
+        #  print("#### journal_size:" + str(journal_size))
+
+        p = self.exec_cmd("sudo mkfs." + fs
+                          + " " + self.HOWTO_MKFS.get(fs, "")
+                          + " -J size=" + str(journal_size)
+                          + " " + dev_path,
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+
+        p = self.exec_cmd(' '.join(["sudo mount -t", fs,
+                                    dev_path, mnt_path]),
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+        p = self.exec_cmd("sudo chmod 777 " + mnt_path,
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+        return True
+
+    def mount_ext4_no_jnl(self, media, fs, mnt_path, nfg):
         (rc, dev_path) = self.init_media(media)
         if not rc:
             return False
@@ -369,14 +438,41 @@ class Runner(object):
             return False
         return True
 
-    def mount(self, media, fs, mnt_path):
+    def mount_ext4_zj(self, media, fs, mnt_path, nfg):
+        (rc, dev_path) = self.init_media(media)
+        if not rc:
+            return False
+
+        per_core_journal_size = int(self.JOURNAL_SIZE / nfg)
+        #  print("#### per-core_journal_size:"+str(per_core_journal_size))
+
+        # Use zjournal/bench/scripts/format.sh. Set proper path.
+        p = self.exec_cmd("sudo /home/yulistic/zjournal/bench/scripts/format.sh" # CONFIG:
+                          + " " + str(per_core_journal_size)
+                          + " " + dev_path,
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+
+        p = self.exec_cmd(' '.join(["sudo mount -t ext4mj",
+                                    dev_path, mnt_path]),
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+        p = self.exec_cmd("sudo chmod 777 " + mnt_path,
+                          self.dev_null)
+        if p.returncode != 0:
+            return False
+        return True
+
+    def mount(self, media, fs, mnt_path, nfg):
         mount_fn = self.HOWTO_MOUNT.get(fs, None)
         if not mount_fn:
             return False;
 
         self.umount(mnt_path)
         self.exec_cmd("mkdir -p " + mnt_path, self.dev_null)
-        return mount_fn(media, fs, mnt_path)
+        return mount_fn(media, fs, mnt_path, nfg)
 
     def _match_config(self, key1, key2):
         for (k1, k2) in zip(key1, key2):
@@ -464,7 +560,7 @@ class Runner(object):
                     continue
 
                 self.prepre_work(ncore)
-                if not self.mount(media, fs, self.test_root):
+                if not self.mount(media, fs, self.test_root, nfg):
                     self.log("# Fail to mount %s on %s." % (fs, media))
                     continue
                 self.log("## %s:%s:%s:%s:%s" % (media, fs, bench, nfg, dio))
@@ -518,7 +614,19 @@ if __name__ == "__main__":
     # TODO: make it scriptable
     run_config = [
         # Set proper thread numbers in the cpupol.py.
-        (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4", "DWAL", "*", "bufferedio")),
+        #  (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4_data", "DWAL", "*", "bufferedio")),
+        #  (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4_zj", "DWAL", "*", "bufferedio")),
+        #  (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4", "DWAL", "*", "bufferedio")),
+        #  (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4_no_jnl", "DWAL", "*", "bufferedio")),
+
+        (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4_data",     "*", "*", "bufferedio")),
+        (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4_zj",       "*", "*", "bufferedio")),
+        (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4",          "*", "*", "bufferedio")),
+        (Runner.CORE_COARSE_GRAIN, PerfMon.LEVEL_LOW, ("nvme", "ext4_no_jnl",   "*", "*", "bufferedio")),
+
+
+
+
         # ("mem", "*", "DWOL", "80", "directio")),
         # ("mem", "tmpfs", "filebench_varmail", "32", "directio")),
         # (Runner.CORE_COARSE_GRAIN,
